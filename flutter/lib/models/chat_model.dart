@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:draggable_float_widget/draggable_float_widget.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get_rx/src/rx_types/rx_types.dart';
 import 'package:get/get.dart';
@@ -42,6 +43,14 @@ class ChatModel with ChangeNotifier {
 
   Rx<VoiceCallStatus> get voiceCallStatus => _voiceCallStatus;
 
+  TextEditingController textController = TextEditingController();
+
+  @override
+  void dispose() {
+    textController.dispose();
+    super.dispose();
+  }
+
   final ChatUser me = ChatUser(
     id: "",
     firstName: translate("Me"),
@@ -74,9 +83,37 @@ class ChatModel with ChangeNotifier {
 
   final WeakReference<FFI> parent;
 
-  ChatModel(this.parent);
+  late final SessionID sessionId;
+  late FocusNode inputNode;
 
-  FocusNode inputNode = FocusNode();
+  ChatModel(this.parent) {
+    sessionId = parent.target!.sessionId;
+    inputNode = FocusNode(
+      onKey: (node, event) {
+        bool isShiftPressed = event.isKeyPressed(LogicalKeyboardKey.shiftLeft);
+        bool isEnterPressed = event.isKeyPressed(LogicalKeyboardKey.enter);
+
+        String trimmedText = textController.text.trim();
+
+        // don't send empty message
+        if (trimmedText.isEmpty) {
+          textController.text = trimmedText;
+        }
+
+        if (isEnterPressed && !isShiftPressed) {
+          final ChatMessage message = ChatMessage(
+            text: trimmedText,
+            user: me,
+            createdAt: DateTime.now(),
+          );
+          send(message);
+          textController.text = "";
+        }
+
+        return KeyEventResult.ignored;
+      },
+    );
+  }
 
   ChatUser get currentUser {
     final user = messages[currentID]?.chatUser;
@@ -302,13 +339,14 @@ class ChatModel with ChangeNotifier {
       _messages[_currentID]?.insert(message);
       if (_currentID == clientModeID) {
         if (parent.target != null) {
-          bind.sessionSendChat(id: parent.target!.id, text: message.text);
+          bind.sessionSendChat(sessionId: sessionId, text: message.text);
         }
       } else {
         bind.cmSendChat(connId: _currentID, msg: message.text);
       }
     }
     notifyListeners();
+    inputNode.requestFocus();
   }
 
   close() {
@@ -347,8 +385,8 @@ class ChatModel with ChangeNotifier {
     }
   }
 
-  void closeVoiceCall(String id) {
-    bind.sessionCloseVoiceCall(id: id);
+  void closeVoiceCall() {
+    bind.sessionCloseVoiceCall(sessionId: sessionId);
   }
 }
 
